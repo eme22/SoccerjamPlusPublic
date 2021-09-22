@@ -183,17 +183,17 @@
 #include <nvault>
 #include <geoip>
 #include <cellarray>
-#include <colorchat_sj>
-#include <dhudmessage>
 
 #define PLUGIN 		"SoccerJam+"
-#define VERSION 	"2.3.0"
-#define LASTCHANGE 	"2020-11-11"
-#define AUTHOR 		"OneEyed&Doon&DK"
+#define VERSION 	"2.3.1"
+#define LASTCHANGE 	"2021-09-21"
+#define AUTHOR 		"OneEyed&Doon&DK&M"
 
 #define BALANCE_IMMUNITY		ADMIN_RCON
 
 #define MAX_PLAYERS 32
+
+#define OFFSET_INTERNALMODEL 126
 
 new g_pcvarMaxCount 
 new g_iCount[MAX_PLAYERS+1] 
@@ -240,7 +240,6 @@ static const mdl_mascots[TEAMS][] = {
 	"models/garg.mdl",
 	"NULL"
 }
-
 static const mdl_mask[TEAMS][] = {
 	"NULL",
 	"models/kickball/jason.mdl",
@@ -250,15 +249,9 @@ static const mdl_mask[TEAMS][] = {
 
 //------------------------- DO NOT EDIT BELOW -----------------------------//
 
-// Curve Ball Defines
-#define CURVE_ANGLE		15	// Angle for spin kick multipled by current direction
-#define CURVE_COUNT		6	// Curve this many times
-#define CURVE_TIME		0.2	// Time to curve again
-#define DIRECTIONS		2	// # of angles allowed
-#define	ANGLEDIVIDE		6	// Divide angle this many times for curve
 
 new TeamNames[TEAMS][32] = {
-	"Unassigned",
+	"Unnasigned",
 	"T",
 	"CT",
 	"Spectator"
@@ -268,6 +261,8 @@ new TeamId[TEAMS]
 #define MODE_NONE 	0
 #define MODE_PREGAME 	1
 #define MODE_GAME 	2
+#define MODE_HALFTIME 	3
+#define MODE_OVERTIME 	5
 
 #define TYPE_PUBLIC 	0
 #define TYPE_TOURNAMENT 1
@@ -288,6 +283,13 @@ new GAME_SETS = SETS_DEFAULT
 
 #define AMOUNT_POWERPLAY 	5
 #define MAX_POWERPLAY		5
+
+// Curve Ball Defines
+#define CURVE_ANGLE		15	// Angle for spin kick multipled by current direction
+#define CURVE_COUNT		6	// Curve this many times
+#define CURVE_TIME		0.2	// Time to curve again
+#define DIRECTIONS		2	// # of angles allowed
+#define	ANGLEDIVIDE		6	// Divide angle this many times for curve
 
 #define SHOTCLOCK_TIME 		12
 #define COUNTDOWN_TIME 		10
@@ -369,9 +371,9 @@ static const RecordTitles[RECORDS + 1][] = {
 }
 
 static const RecordTitlesLong[RECORDS + 1][] = {
-	"NULL", "Goals", "Assists", "Steals", "Goalsaves", "Passes", "Ball losses",
-	"Smacks", "Hunts", "Deaths", "Possession", "Ballkills", "Hits", "Ballholder Hits",
-	"Disarms", "Disarmed", "Furthest goal"
+	"NULL", "SJ_GOL", "SJ_AST", "SJ_STL", "SJ_GSV", "SJ_PAS", "SJ_BLS",
+	"SJ_SMK", "SJ_HNT", "SJ_DTH", "SJ_POS", "SJ_BKL", "SJ_HITS", "SJ_BHITS",
+	"SJ_DHITS", "SJ_DISED", "SJ_FGL"
 }
 
 #define UPGRADES 5
@@ -382,6 +384,54 @@ enum {
 	DEX,		// dexterity
 	DIS		// disarm
 }
+
+new const TEAM_NAMES[][] = {
+	"Alianza Lima",
+	"Universitario",
+	"Sport Boys",
+	"Sporting Cristal",
+	"Sport Huancayo",
+	"Ayacucho FC",
+	"Cuzco FC",
+	"Melgar",
+	"Binacional",
+	"Municipal",
+	"Cienciano",
+	"San Martin",
+	"Universida Tecnica",
+	"Union Comercio",
+	"Comerciantes Unidos",
+	"Juan Aurich",
+	"Alianza Universidad",
+	"Club Atletico Grau",
+	"Cesar Vallejo",
+	"Carlos Manucci"
+}
+
+new const TEAMS_PREFIX[][] = {
+	"ALI",
+	"UNI",
+	"SBA",
+	"SC",
+	"HUA",
+	"AFC",
+	"CFC",
+	"MEL",
+	"BIN",
+	"MUN",
+	"CCF",
+	"SM",
+	"UTC",
+	"COM",
+	"CUM",
+	"JA",
+	"ALU",
+	"GRA",
+	"SCV",
+	"CM"
+}
+
+new EQUIPO_CT_PREFIX[4], EQUIPO_T_PREFIX[4]
 
 static const UpgradeTitles[UPGRADES + 1][] = { "NULL", "STA", "STR", "AGI", "DEX", "DIS" }
 new UpgradeMax[UPGRADES + 1]
@@ -515,7 +565,7 @@ new g_authid[MAX_PLAYERS + 1][36]
 
 new cv_nogoal, cv_alienzone, cv_alienthink, cv_kick, cv_turbo, cv_reset, cv_resptime, cv_smack,
 cv_ljdelay, cv_huntdist, cv_score[3], cv_multiball, cv_lamedist, cv_alienmin, cv_alienmax,
-cv_time, cv_balldist, cv_players, cv_chat, cv_pause, cv_regen, cv_blockspray, cv_antideveloper, cv_description, cv_timer
+cv_type, cv_time, cv_balldist, cv_players, cv_chat, cv_pause, cv_regen, cv_blockspray, cv_antideveloper, cv_description, cv_timer, cv_metersenabled
 
 
 new g_cam[MAX_PLAYERS + 1]
@@ -536,7 +586,7 @@ new g_distshot
 new g_Time[MAX_PLAYERS + 1]
 new bool:g_lame = false, bool:g_nogk[TEAMS] = false
 
-new OFFSET_INTERNALMODEL
+//new OFFSET_INTERNALMODEL
 
 new g_Timeleft
 new bool:g_Ready[MAX_PLAYERS + 1]
@@ -578,6 +628,14 @@ new g_TempTeamNames[TEAMS][32]
 
 new g_mapname[32]
 
+stock client_cmd2(id, cmd[])
+{
+	message_begin(MSG_ONE, SVC_DIRECTOR, _, id)
+	write_byte(strlen(cmd) + 2)
+	write_byte(10)
+	write_string(cmd)
+	message_end()
+}
 
 enum ReasonCodes{
 	DR_TIMEDOUT,
@@ -942,7 +1000,7 @@ public plugin_init(){
 	msg_statusicon 	= get_user_msgid("StatusIcon")
 	msg_scoreboard 	= get_user_msgid("ScoreInfo")
 
-	OFFSET_INTERNALMODEL = is_amd64_server() ? 152 : 126
+	//OFFSET_INTERNALMODEL = is_amd64_server() ? 152 : 126
 
 	set_msg_block(get_user_msgid("RoundTime"), 	BLOCK_SET)
 	set_msg_block(get_user_msgid("ClCorpse"), 	BLOCK_SET)
@@ -967,7 +1025,8 @@ public plugin_init(){
 	register_impulse( 201, "FwdImpulse_201" );
 	
 
-	//cv_type		=	register_cvar("sj_type", 	"0")
+	cv_type		=	register_cvar("sj_type", 	"0")
+	cv_metersenabled = register_cvar("sj_meters", "0")
 	cv_huntdist 	=	register_cvar("sj_huntdist", 	"0")
 	cv_lamedist 	=	register_cvar("sj_lamedist", 	"90")
 	cv_score[0] 	= 	register_cvar("sj_score", 	"ScoreLim[31]")
@@ -1027,8 +1086,8 @@ public plugin_init(){
 	register_clcmd("noclip", 	"BlockCommand")
 	//register_clcmd("developer 1", 	"BlockCommand")
 	register_clcmd("god",	"BlockCommand")
-
-	register_concmd("showbriefing", "AdminMenu", 	ADMIN_IMMUNITY, 	"SJ Admin Menu")
+	register_concmd("sj_endgame", 	"EndGame", 	ADMIN_KICK, 	"Ends a current match")
+	register_concmd("showbriefing", "AdminMenu", 	ADMIN_KICK, 	"SJ Admin Menu")
 	register_concmd("nightvision", 	"CameraChanger",_,		"Switches camera view")
 	//register_concmd("sj_update", 	"Update", 	_,  		"Updates plugin")
 	register_concmd("amx_restart", 	"Restart",	ADMIN_KICK, 	"Restart server")
@@ -1044,14 +1103,15 @@ public plugin_init(){
 	set_pcvar_num(cv_score[CT], 0)
 	set_pcvar_num(cv_score[0], ScoreLim[31])
 	
-	GAME_TYPE = TYPE_PUBLIC
+	GAME_TYPE = get_pcvar_num(cv_type)
 	if(GAME_TYPE == TYPE_PUBLIC){
-		GAME_MODE = MODE_NONE
-		//gTournamentId = 8
+		GAME_MODE = MODE_PREGAME
+		//gTournamentId = TOURNAMENTID
 	} else {
 		GAME_MODE = MODE_NONE
-		//gTournamentId = 8
+		//gTournamentId = TOURNAMENTID
 	}
+	
 	g_Timeleft = get_pcvar_num(cv_time) * 60
 	new x
 	for(x = 1; x <= UPGRADES; x++){
@@ -1126,7 +1186,8 @@ public plugin_init(){
 public ApplyServerSettings(){
 	server_cmd("mp_timelimit 0")
 	timer = COUNTDOWN_TIME
-	BeginCountdown()
+	if(GAME_MODE == MODE_PREGAME)
+		BeginCountdown()
 }
 	
 public LogEvent_JoinTeam()
@@ -1150,8 +1211,9 @@ public Restart(id, level, cid){
 		
 	new sz_name[32]
 	get_user_name(id, sz_name, charsmax(sz_name))
-	client_print(0, print_console, "[SJ] - Restart server. (ADMIN: %s)", sz_name)
-	ColorChat(0, GREEN, "^4[SJ] ^1- Restart server. (ADMIN: %s)", sz_name)
+	client_print(0, print_console, "[SJ] - Servidor reiniciado. (ADMIN: %s)", sz_name)
+	//client_print_color(0, print_team_default, )
+	client_print_color(0, print_team_default, "^4[SJ] ^1- Servidor reiniciado. (ADMIN: %s)", sz_name)
 	set_task(2.0, "task_Restart")
 	return PLUGIN_HANDLED
 }
@@ -1166,7 +1228,7 @@ public task_Restart(){
 
 public Version(id){
 	console_print(id, "SoccerJam+ v.%s | %s", VERSION, LASTCHANGE)
-	console_print(id, "Original version by OneEyed. Updateed by Doondook & DK.")
+	console_print(id, "Original version by OneEyed. Updateed by Doondook & DK. Traducido por M")
 	console_print(id, "Official web-site: http://sj-pro.com")
 
 	return PLUGIN_HANDLED
@@ -1333,7 +1395,7 @@ stock MoveBall(where, team = 0, i){
 					}
 
 					entity_set_origin(g_ball[i], sz_orig)
-					formatex(g_temp, charsmax(g_temp), "Ball is at %s side!", TeamNames[team])
+					formatex(g_temp, charsmax(g_temp), "%L %s %L", LANG_PLAYER, "SJ_SIDBALL1", TeamNames[team], LANG_PLAYER, "SJ_SIDBALL2")
 					entity_set_vector(g_ball[i], EV_VEC_velocity, Float:{0.0, 0.0, 50.0})
 				}
 			} else {
@@ -1385,7 +1447,7 @@ stock MoveBall(where, team = 0, i){
 
 						entity_set_origin(g_ball[i], sz_orig)
 						entity_set_vector(g_ball[i], EV_VEC_velocity, Float:{0.0, 0.0, 400.0})
-						format(g_temp, charsmax(g_temp), "%L", LANG_SERVER, "SJ_MIDDLEBALL")
+						format(g_temp, charsmax(g_temp), "%L", LANG_PLAYER, "SJ_MIDDLEBALL")
 					}
 				}
 			}
@@ -1538,7 +1600,7 @@ public KickBall(id, velType){
 
 	get_user_name(id, g_last_ballholdername[i], 31)
 	format(g_temp, charsmax(g_temp), "|%s| %s^n%L", TeamNames[team], g_last_ballholdername[i],
-	LANG_SERVER, "SJ_KICKBALL")
+	LANG_PLAYER, "SJ_KICKBALL")
 
 	return PLUGIN_HANDLED
 }
@@ -1629,7 +1691,7 @@ public ClearBall(i){
 	i -= 55555
 	if(is_valid_ent(g_ball[i])){
 		play_wav(0, snd_returned)
-		format(g_temp, charsmax(g_temp), "%L", LANG_SERVER, "SJ_MIDDLEBALL")
+		format(g_temp, charsmax(g_temp), "%L", LANG_PLAYER, "SJ_MIDDLEBALL")
 		MoveBall(1, 0, i)
 	}
 }
@@ -1684,15 +1746,15 @@ public StatusDisplay(szEntity){
 				
 				sz_len = 0
 
-				sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "Top Match Statistics^n^n")
+				sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "Estadisticas del partido^n^n")
 				sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len,
 				"%s - %d : %d - %s^n", g_TempTeamNames[T], get_pcvar_num(cv_score[T]),
 				get_pcvar_num(cv_score[CT]), g_TempTeamNames[CT])
 				set_dhudmessage(255, 255, 20, -1.0, 0.05, 0, 0.1, 0.5, 0.3, 0.3)
 				if(GAME_TYPE == TYPE_TOURNAMENT){
-					show_dhudmessage(id, "FULL-TIME")
+					show_dhudmessage(id, "PARTIDO TERMINADO")
 				    } else {
-					show_dhudmessage(id, "CHANGING MAP...")
+					show_dhudmessage(id, "CAMBIANDO MAPA...")
 				}
 				for(i = 1; i <= RECORDS; i++){
 					if(i == POSSESSION){
@@ -1753,11 +1815,11 @@ public StatusDisplay(szEntity){
 							}
 							case DISTANCE:{
 								sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len,
-								" %L", id, "SJ_FT")
+								" %L", id, get_pcvar_num(cv_metersenabled)?"SJ_MTRS":"SJ_FT")
 
 								if(TopPlayer[1][i] != MadeRecord[id][i] && TopPlayer[1][i]){
 									sz_len += format(sz_temp[sz_len],
-									charsmax(sz_temp) - sz_len, " (%d) %L", MadeRecord[id][i], id, "SJ_FT")
+									charsmax(sz_temp) - sz_len, " (%d) %L", MadeRecord[id][i], id, get_pcvar_num(cv_metersenabled)?"SJ_MTRS":"SJ_FT")
 								}
 							}
 							default: {
@@ -1771,7 +1833,7 @@ public StatusDisplay(szEntity){
 				}
 				if(!equal(g_MVP_name, "")){
 					set_dhudmessage(20, 255, 20, -1.0, 0.1, 0, 0.1, 0.4, 0.1, 0.1)
-					show_dhudmessage(id, "MVP of the match is %s!", g_MVP_name)
+					show_dhudmessage(id, "MVP es %s!", g_MVP_name)
 				}
 				
 				if(winner && g_showhud[id]){
@@ -1825,10 +1887,12 @@ public StatusDisplay(szEntity){
 						continue
 
 					set_dhudmessage(255, 20, 20, 0.44, 0.05, 0, 1.1, 1.1, 1.1, 1.1)
-					show_dhudmessage(id, "%s - %d", TeamNames[T], get_pcvar_num(cv_score[1]))
+					//show_dhudmessage(id, " %s - %d", TeamNames[T], get_pcvar_num(cv_score[1]))
+					show_dhudmessage(id, " %s - %d", EQUIPO_T_PREFIX, get_pcvar_num(cv_score[1]))
 
 					set_dhudmessage(20, 20, 255, 0.52, 0.05, 0, 1.1, 1.1, 1.1, 1.1)
-					show_dhudmessage(id, "%d - %s", get_pcvar_num(cv_score[2]), TeamNames[CT])
+					show_dhudmessage(id, "%d - %s", get_pcvar_num(cv_score[2]), EQUIPO_CT_PREFIX)
+					//show_dhudmessage(id, "%d - %s", get_pcvar_num(cv_score[2]), TeamNames[CT])
 					/*
 					if(!winner){
 						format(sz_temp, charsmax(sz_temp), " %L ", id,
@@ -2069,7 +2133,7 @@ public touch_Player(ball, player){
 				Event_Record(g_last_ballholder[i], LOSS)
 
 			format(g_temp, charsmax(g_temp), "|%s| %s^n%L", TeamNames[playerteam], aname,
-			LANG_SERVER, "SJ_STOLEBALL")
+			LANG_PLAYER, "SJ_STOLEBALL")
 
 			stolen = 1
 
@@ -2087,7 +2151,7 @@ public touch_Player(ball, player){
 			PowerPlay[i] = 0
 		} else {
 			format(g_temp, charsmax(g_temp), "|%s| %s^n%L", TeamNames[playerteam], aname,
-			LANG_SERVER, "SJ_PICKBALL")
+			LANG_PLAYER, "SJ_PICKBALL")
 		}
 
 		new bool:check
@@ -2103,7 +2167,7 @@ public touch_Player(ball, player){
 		curvecount[i] = 0
 		direction[i] = 0
 
-		format(g_temp2, charsmax(g_temp2), "%L: %i", LANG_SERVER, "SJ_POWERPLAY",
+		format(g_temp2, charsmax(g_temp2), "%L: %i", LANG_PLAYER, "SJ_POWERPLAY",
 		(PowerPlay[i] > 0)?(PowerPlay[i] - 1):0)
 
 		if(g_last_ballholder[i] != g_ballholder[i] && g_last_ballholder[i]){
@@ -2173,20 +2237,23 @@ public touch_Goalnet(ball, goalpost){
 			for(t = 0; t < 3; t++)
 				distorig[1][t] = floatround(ccorig[t])
 			pev(goalpost, pev_origin, gnorig)
-			g_distshot = (get_distance(distorig[0], distorig[1]) / 12)
+			if (get_pcvar_num(cv_metersenabled))
+				g_distshot = floatround(get_distance(distorig[0], distorig[1]) * 0.0254)
+			else
+				g_distshot = (get_distance(distorig[0], distorig[1]) / 12)
 
 			if(g_lame &&  g_distshot > get_pcvar_num(cv_lamedist)){
 				MoveBall(0, team==T?CT:T, i)
 				for(i = 1; i < g_maxplayers; i++){
 					if(IsUserConnected(i) && ~IsUserBot(i))
-						ColorChat(i, RED, "^4[SJ] ^1- ^3%L",
+						client_print_color(i, print_team_red, "^4[SJ] ^1- ^3%L",
 						i, "SJ_LAME", i)
 				}
 
 				return PLUGIN_HANDLED
 			}
 			if((task_exists(-5005) && team == CT) || (task_exists(-5006) && team == T)){
-				ColorChat(0, (team == T)?RED:BLUE, "^4[SJ] ^1- ^3GK hunt! ^1Goal has been cancelled.")
+				client_print_color(0,  (team == T)?print_team_red:print_team_blue, "^4[SJ] ^1- ^3Gol Cazado! ^1El gol ha sido cancelado.")
 				for(t = 1; t <= g_maxplayers; t++){
 					if(IsUserAlive(t) && (T <= get_user_team(t) <= CT)){
 						cs_user_spawn(t)
@@ -2195,9 +2262,10 @@ public touch_Goalnet(ball, goalpost){
 				MoveBall(0, team==T?CT:T, i)
 				return PLUGIN_HANDLED
 			}
+			
 			format(g_temp, charsmax(g_temp), "|%s| %s^n%L %L!",
 			TeamNames[team], g_last_ballholdername[i],
-			LANG_SERVER, "SJ_SCORE", g_distshot, LANG_SERVER, "SJ_FT")
+			LANG_PLAYER, "SJ_SCORE", g_distshot, LANG_PLAYER, get_pcvar_num(cv_metersenabled)?"SJ_MTRS":"SJ_FT")
 
 			new sz_temp[MAX_ASSISTERS * 45]
 			format(sz_temp, charsmax(sz_temp), "^3%s", g_last_ballholdername[i])
@@ -2255,9 +2323,9 @@ public touch_Goalnet(ball, goalpost){
 					save_stats(i)
 
 				if(floatabs(ccorig[1] - gnorig[1]) > 20.0){
-					ColorChat(i, (team == T)?RED:BLUE, "%s ^4%L %L!", sz_temp, i, "SJ_SCORE", g_distshot, i, "SJ_FT")
+					client_print_color(i,  (team == T)?print_team_red:print_team_blue, "%s ^4%L %L!", sz_temp, i, "SJ_SCORE", g_distshot, i, get_pcvar_num(cv_metersenabled)?"SJ_MTRS":"SJ_FT")
 				} else {
-					ColorChat(i, (team == T)?RED:BLUE, "%s ^4%L %L ^3[MIDDLE]!", sz_temp, i, "SJ_SCORE", g_distshot, i, "SJ_FT")
+					client_print_color(i,  (team == T)?print_team_red:print_team_blue, "%s ^4%L %L ^3[MIDDLE]!", sz_temp, i, "SJ_SCORE", g_distshot, i, get_pcvar_num(cv_metersenabled)?"SJ_MTRS":"SJ_FT")
 				}
 			}
 			Event_Record(g_last_ballholder[i], GOAL)
@@ -2284,7 +2352,7 @@ public touch_Goalnet(ball, goalpost){
 			}
 			if(winner){
 				play_wav(0, snd_whistle_long)
-				format(scoreboard, charsmax(scoreboard), "%L", LANG_SERVER, "SJ_TEAMWIN", TeamNames[winner])
+				format(scoreboard, charsmax(scoreboard), "%L", LANG_PLAYER, "SJ_TEAMWIN", TeamNames[winner])
 				log_amx("[SJ] - TEAM %s WON! The map will be changed.", TeamNames[winner])
 
 				set_task(1.0, "ShowDHud", _, TeamColors[winner], 3, "a", 1)
@@ -2471,17 +2539,17 @@ public vgui_jointeamtwo(id){
 bool:join_team(id, key=-1) {
 	new team = get_user_team(id)
 	if(key == 4){
-		ColorChat(id, GREY, "Please choose a team manually!")
+		client_print_color(id,  print_team_grey, "Seleccione un equipo manualmente!")
 		return true
 	}
 	if((team == 1 || team == 2) && (key == team - 1)){
-		ColorChat(id, RED, "You can not rejoin the same team!")
+		client_print_color(id, print_team_red, "No puedes unirte a tu mismo equipo!")
 		engclient_cmd(id, "chooseteam")
 		return true
 	}
 	if(g_regtype == 2){
 		if((0 <= key <= 1) && !equal(TeamNames[key + 1], g_userClanName[id])){
-			ColorChat(id, key?BLUE:RED, "^4[SJ] ^1- You are not member of clan ^3%s^1!", TeamNames[key + 1])
+			client_print_color(id,  key?print_team_blue:print_team_red, "^4[SJ] ^1- No eres un miembro del clan ^3%s^1!", TeamNames[key + 1])
 			engclient_cmd(id, "chooseteam")
 			return true
 		} else if(GAME_MODE != MODE_PREGAME) {
@@ -2491,7 +2559,7 @@ bool:join_team(id, key=-1) {
 					sz_count++
 
 			if(sz_count >= 5){
-				ColorChat(id, key?BLUE:RED, "^4[SJ] ^1- Too many players for ^3%s^1!", TeamNames[key + 1])
+				client_print_color(id,  key?print_team_blue:print_team_red, "^4[SJ] ^1- Demasiados jugadores para ^3%s^1!", TeamNames[key + 1])
 				engclient_cmd(id,"chooseteam")
 				return true
 			}
@@ -2508,7 +2576,7 @@ bool:join_team(id, key=-1) {
 				sz_count++
 
 		if(sz_count >= get_pcvar_num(cv_players) && get_pcvar_num(cv_players)){
-			ColorChat(id, key?BLUE:RED, "^4[SJ] ^1- %d players for ^3%s ^1is allowed", get_pcvar_num(cv_players), TeamNames[key + 1])
+			client_print_color(id,  key?print_team_blue:print_team_red, "^4[SJ] ^1- %d players for ^3%s ^1is allowed", get_pcvar_num(cv_players), TeamNames[key + 1])
 
 			engclient_cmd(id,"chooseteam")
 			return true
@@ -2594,7 +2662,7 @@ public PlayerDamage(victim, inflictor, attacker, Float:damage, damagetype){
 						Event_Record(victim, DISARMED)
 
 						KickBall(victim, 1)
-						ColorChat(0, (sz_team == T)?RED:BLUE, "^3%s ^1has been disarmed", vname)
+						client_print_color(0, (sz_team == T)?print_team_red:print_team_blue, "^3%s ^1has been disarmed", vname)
 						//client_print(attacker, print_chat, "%L", attacker, "SJ_DISA", vname)
 						//client_print(victim, print_chat, "%L", victim, "SJ_DISED", aname)
 					}
@@ -2715,6 +2783,7 @@ public SetupRound(){
 			MoveBall(1, 0, i)
 		else if(contain(g_mapname, "soccerjam") > -1 
 			|| contain(g_mapname, "sj_trix_zone") > -1 
+			|| contain(g_mapname, "sj_matute2_pg_beta1") > -1 
 			|| contain(g_mapname, "sansiro") > -1 
 			|| contain(g_mapname, "danger_final") > -1 
 			|| contain(g_mapname, "mxsoccer_small") > -1 
@@ -2761,7 +2830,7 @@ public PlayerKilled(victim, killer, shouldgib){
 			set_task(get_pcvar_float(cv_reset), "ClearBall", 55555 + i)
 
 			format(g_temp, charsmax(g_temp), "|%s| %s^n%L", TeamNames[sz_team], sz_name,
-			LANG_SERVER, "SJ_DROPBALL")
+			LANG_PLAYER, "SJ_DROPBALL")
 
 			// remove glow of owner and set ball velocity really really low
 			glow(g_ballholder[i], 0, 0, 0)
@@ -3000,11 +3069,14 @@ public CurveRight(id){
 
 SendCenterText(id, dir){
 	new sz_temp[12]
-	if(dir < 0){
+	if(dir == 0){
+		client_print(id, print_center, "%L", id, "SJ_NODEGREES")
+		return;
+	}
+	else if(dir < 0){
 		format(sz_temp, charsmax(sz_temp), "%L", id, "SJ_RIGHT")
-	} else if(dir == 0) {
-		format(sz_temp, charsmax(sz_temp), "-")
-	} else if(dir > 0) {
+	}
+	else if(dir > 0) {
 		format(sz_temp, charsmax(sz_temp), "%L", id, "SJ_LEFT")
 	}
 
@@ -3037,6 +3109,32 @@ public CurveLeft(id){
 +-----------------------+--------------------------------------------------------------------------+
 */
 
+public EndGame(id, level, cid) {
+	if(!cmd_access(id, level, cid, 0) || GAME_TYPE == TYPE_PUBLIC)
+		return PLUGIN_HANDLED
+		
+	new name[64]
+	get_user_name(id, name, charsmax(name))
+	
+	client_print_color(0, print_team_default, "^4[SJ] ^1- JUEGO TERMINADO (ADMIN: %s)", name)
+	
+	MoveBall(0, 0, 0)
+	g_current_match = 0
+	gMatchId = 0
+	//g_saveall = 1
+	set_pcvar_num(cv_score[T], 0)
+	set_pcvar_num(cv_score[CT], 0)
+	remove_task(9999)
+	
+	//ROUND = -1
+	
+	set_task(3.0, "PostGame")
+	
+	round_restart(3.0)
+	
+	return PLUGIN_HANDLED
+}
+
 public ChatCommands(id){
 	new said[192]
 	read_args(said, 192)
@@ -3048,7 +3146,7 @@ public ChatCommands(id){
 	if(GAME_MODE == MODE_PREGAME) {
 		if((equal(sz_cmd, ".ready") || equal(sz_cmd, "/ready")) && T <= sz_team <= CT) {
 			if(g_Credits[id]) {
-				ColorChat(id, RED, "You must use all your credits before becoming ready!")
+				client_print_color(id, print_team_red, "You must use all your credits before becoming ready!")
 				return PLUGIN_HANDLED_MAIN
 			}
 
@@ -3057,7 +3155,7 @@ public ChatCommands(id){
 				return PLUGIN_HANDLED_MAIN
 			} else {
 				if(g_Ready[id] == false){
-					ColorChat(0, (sz_team == T)?RED:BLUE, "^3%s ^1: ^4.ready", sz_name)
+					client_print_color(0, (sz_team == T)?print_team_red:print_team_blue, "^3%s ^1: ^4.ready", sz_name)
 
 					g_Ready[id] = true
 					return PLUGIN_HANDLED_MAIN
@@ -3069,7 +3167,7 @@ public ChatCommands(id){
 			if(!get_pcvar_num(cv_chat)) {
 				return PLUGIN_HANDLED_MAIN
 			} else {
-				ColorChat(0, (sz_team == T)?RED:BLUE, "^3%s ^1: ^4.wait", sz_name)
+				client_print_color(0, (sz_team == T)?print_team_red:print_team_blue, "^3%s ^1: ^4.wait", sz_name)
 
 				return PLUGIN_HANDLED_MAIN
 			}
@@ -3086,7 +3184,7 @@ public ChatCommands(id){
 			if(!get_pcvar_num(cv_chat)){
 				return PLUGIN_HANDLED_MAIN
 			} else {
-				ColorChat(0, (sz_team == T)?RED:BLUE, "^3%s ^1: ^4.reset", sz_name)
+				client_print_color(0, (sz_team == T)?print_team_red:print_team_blue, "^3%s ^1: ^4.reset", sz_name)
 
 				return PLUGIN_HANDLED_MAIN
 			}
@@ -3106,7 +3204,7 @@ public ChatCommands(id){
 				TNT_ShowMenuPlayerStats(id, player)
 				//ShowMOTDStats(id, player)
 			} else {
-				ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
+				client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
 			}
 		}
 		if(!get_pcvar_num(cv_chat))
@@ -3118,7 +3216,7 @@ public ChatCommands(id){
 		} else if(player) {
 			TNT_ShowUpgrade(id, player)
 		} else {
-			ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
 		}
 
 		if(!get_pcvar_num(cv_chat))
@@ -3169,7 +3267,7 @@ public ChatCommands(id){
 			return PLUGIN_HANDLED_MAIN
 	} else if(contain(sz_cmd, ".setskills") != -1 || contain(sz_cmd, "/setskills") != -1){
 		if(!is_user_admin(id)){
-			ColorChat(id, RED, "^4[SJ] ^1- ^3You have no access to this command.")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^3You have no access to this command.")
 			return PLUGIN_HANDLED_MAIN
 		}
 		new sz_skills[16], sz_buff[64], sz_name[32], i, sz_len
@@ -3180,8 +3278,8 @@ public ChatCommands(id){
 			for(i = 1; i <= UPGRADES; i++)
 				sz_len += format(sz_buff[sz_len], charsmax(sz_buff) - sz_len, "<0-%d>", UpgradeMax[i])
 
-			ColorChat(id, RED, "^4[SJ] ^1- ^4Usage: ^1/setskills <player> %s", sz_buff)
-			ColorChat(id, RED, "^1This example sets GK skills for Player: ^4/setskills Player 00550")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^4Usage: ^1/setskills <player> %s", sz_buff)
+			client_print_color(id, print_team_red, "^1This example sets GK skills for Player: ^4/setskills Player 00550")
 			return PLUGIN_HANDLED_MAIN
 		}
 
@@ -3189,13 +3287,13 @@ public ChatCommands(id){
 		new sz_sk[UPGRADES + 1]
 		for(i = UPGRADES; i; i--){
 			if((sz_sk[i] = (x % 10)) > UpgradeMax[i]){
-				ColorChat(id, RED, "^4[SJ] ^1- ^3Invalid skills!")
+				client_print_color(id, print_team_red, "^4[SJ] ^1- ^3Invalid skills!")
 				return PLUGIN_HANDLED_MAIN
 			}
 			x /= 10
 		}
 		if(x < 0){
-			ColorChat(id, RED, "^4[SJ] ^1- ^3Invalid skills!")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^3Invalid skills!")
 			return PLUGIN_HANDLED_MAIN
 		} else {
 			new player = cmd_target(id, info, 2 | 8)
@@ -3219,9 +3317,9 @@ public ChatCommands(id){
 				}
 				g_Credits[player] = 0
 
-				ColorChat(0, RED, "^4[SJ] ^1- %s skills are set:%s ^1(ADMIN: %s)", sz_name, sz_buff, sz_aname)
+				client_print_color(0, print_team_red, "^4[SJ] ^1- %s skills are set:%s ^1(ADMIN: %s)", sz_name, sz_buff, sz_aname)
 			} else {
-				ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
+				client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
 			}
 		}
 
@@ -3253,11 +3351,11 @@ public ChatCommands(id){
 		get_user_name(id, sz_name, 31)
 
 		if(sz_team == T){
-			ColorChat(i, RED, "%s ^1: %s", sz_name, said)
+			client_print_color(i, print_team_red, "^3%s ^1: %s", sz_name, said)
 		} else if(sz_team == CT) {
-			ColorChat(i, BLUE, "%s ^1: %s", sz_name, said)
+			client_print_color(i, print_team_blue, "^3%s ^1: %s", sz_name, said)
 		} else {
-			ColorChat(i, GREY, "%s ^1: %s", sz_name, said)
+			client_print_color(i, print_team_grey, "^3%s ^1: %s", sz_name, said)
 		}
 	}
 
@@ -3276,7 +3374,7 @@ public ChatCommands_team(id){
 	if(GAME_MODE == MODE_PREGAME) {
 		if((equal(sz_cmd, ".ready") || equal(sz_cmd, "/ready")) && (T <= sz_team <= CT)){
 			if(g_Credits[id]) {
-				ColorChat(id, RED, "You must use all your credits before becoming ready!")
+				client_print_color(id, print_team_red, "You must use all your credits before becoming ready!")
 			} else {
 				if(g_Ready[id] == false){
 					g_Ready[id] = true
@@ -3284,12 +3382,12 @@ public ChatCommands_team(id){
 					if(sz_team == T){
 						for(new i = 1; i <= g_maxplayers; i++){
 							if(IsUserConnected(i) && get_user_team(i) == T)
-								ColorChat(i, RED, "^1(Terrorist) ^3%s ^1: ^4.ready", sz_name)
+								client_print_color(i, print_team_red, "^1(Terrorist) ^3%s ^1: ^4.ready", sz_name)
 						}
 					} else {
 						for(new i = 1; i <= g_maxplayers; i++){
 							if(IsUserConnected(i) && get_user_team(i) == CT)
-								ColorChat(i, BLUE, "^1(Counter-Terrorist) ^3%s ^1: ^4.ready", sz_name)
+								client_print_color(i, print_team_blue, "^1(Counter-Terrorist) ^3%s ^1: ^4.ready", sz_name)
 						}
 					}
 
@@ -3302,12 +3400,12 @@ public ChatCommands_team(id){
 			if(sz_team == T){
 				for(new i = 1; i <= g_maxplayers; i++){
 					if(IsUserConnected(i) && get_user_team(i) == T)
-						ColorChat(i, RED, "^1(Terrorist) ^3%s ^1: ^4.wait", sz_name)
+						client_print_color(i, print_team_red, "^1(Terrorist) ^3%s ^1: ^4.wait", sz_name)
 				}
 			} else {
 				for(new i = 1; i <= g_maxplayers; i++){
 					if(IsUserConnected(i) && get_user_team(i) == CT)
-						ColorChat(i, BLUE, "^1(Counter-Terrorist) ^3%s ^1: ^4.wait", sz_name)
+						client_print_color(i, print_team_blue, "^1(Counter-Terrorist) ^3%s ^1: ^4.wait", sz_name)
 				}
 			}
 
@@ -3325,12 +3423,12 @@ public ChatCommands_team(id){
 				if(sz_team == T){
 					for(new i = 1; i <= g_maxplayers; i++){
 						if(IsUserConnected(i) && get_user_team(i) == T)
-							ColorChat(i, RED, "^1(Terrorist) ^3%s ^1: ^4.reset", sz_name)
+							client_print_color(i, print_team_red, "^1(Terrorist) ^3%s ^1: ^4.reset", sz_name)
 					}
 				} else {
 					for(new i = 1; i <= g_maxplayers; i++){
 						if(IsUserConnected(i) && get_user_team(i) == CT)
-							ColorChat(i, BLUE, "^1(Counter-Terrorist) ^3%s ^1: ^4.reset", sz_name)
+							client_print_color(i, print_team_blue, "^1(Counter-Terrorist) ^3%s ^1: ^4.reset", sz_name)
 					}
 				}
 
@@ -3350,7 +3448,7 @@ public ChatCommands_team(id){
 			if(player){
 				TNT_ShowMenuPlayerStats(id, player)
 			} else {
-				ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
+				client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
 			}
 		}
 	} else if(contain(sz_cmd, ".skills") != -1 || contain(sz_cmd, "/skills") != -1 ){
@@ -3360,7 +3458,7 @@ public ChatCommands_team(id){
 		} else if(player) {
 			TNT_ShowUpgrade(id, player)
 		} else {
-			ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
 		}
 	} else if((equal(sz_cmd, ".reset") || equal(sz_cmd, "/reset")) && T <= sz_team <= CT) {
 		ResetSkills(id)
@@ -3388,7 +3486,7 @@ public ChatCommands_team(id){
 		ShowHelp(id, x)
 	} else if(contain(sz_cmd, ".setskills") != -1 || contain(sz_cmd, "/setskills") != -1){
 		if(!is_user_admin(id)){
-			ColorChat(id, RED, "^4[SJ] ^1- ^3You have no access to this command.")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^3You have no access to this command.")
 			return PLUGIN_CONTINUE
 		}
 		new sz_skills[16], sz_buff[64], sz_name[32], i, sz_len
@@ -3399,8 +3497,8 @@ public ChatCommands_team(id){
 			for(i = 1; i <= UPGRADES; i++)
 				sz_len += format(sz_buff[sz_len], charsmax(sz_buff) - sz_len, "<0-%d>", UpgradeMax[i])
 
-			ColorChat(id, RED, "^4[SJ] ^1- ^4Usage: ^1/setskills <player> %s", sz_buff)
-			ColorChat(id, RED, "^1This example sets GK skills for Player: ^4/setskills Player 00550")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^4Usage: ^1/setskills <player> %s", sz_buff)
+			client_print_color(id, print_team_red, "^1This example sets GK skills for Player: ^4/setskills Player 00550")
 			return PLUGIN_CONTINUE
 		}
 
@@ -3408,13 +3506,13 @@ public ChatCommands_team(id){
 		new sz_sk[UPGRADES + 1]
 		for(i = UPGRADES; i; i--){
 			if((sz_sk[i] = (x % 10)) > UpgradeMax[i]){
-				ColorChat(id, RED, "^4[SJ] ^1- ^3Invalid skills!")
+				client_print_color(id, print_team_red, "^4[SJ] ^1- ^3Invalid skills!")
 				return PLUGIN_CONTINUE
 			}
 			x /= 10
 		}
 		if(x < 0){
-			ColorChat(id, RED, "^4[SJ] ^1- ^3Invalid skills!")
+			client_print_color(id, print_team_red, "^4[SJ] ^1- ^3Invalid skills!")
 			return PLUGIN_CONTINUE
 		} else {
 			new player = cmd_target(id, info, 2 | 8)
@@ -3438,9 +3536,9 @@ public ChatCommands_team(id){
 				}
 				g_Credits[player] = 0
 
-				ColorChat(0, RED, "^4[SJ] ^1- %s skills are set:%s ^1(ADMIN: %s)", sz_name, sz_buff, sz_aname)
+				client_print_color(0, print_team_red, "^4[SJ] ^1- %s skills are set:%s ^1(ADMIN: %s)", sz_name, sz_buff, sz_aname)
 			} else {
-				ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
+				client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_INVPLAYER")
 			}
 		}
 	} else if(equal(sz_cmd, "/helpmenu") || equal(sz_cmd, ".helpmenu")){
@@ -3468,11 +3566,11 @@ public ChatCommands_team(id){
 		get_user_name(id, sz_name, 31)
 
 		if(sz_team == T) {
-			ColorChat(i, RED, "^1(Terrorist) ^3%s ^1: %s", sz_name, said)
+			client_print_color(i, print_team_red, "^1(Terrorist) ^3%s ^1: %s", sz_name, said)
 		} else if(sz_team == CT) {
-			ColorChat(i, BLUE, "^1(Counter-Terrorist) ^3%s ^1: %s", sz_name, said)
+			client_print_color(i, print_team_blue, "^1(Counter-Terrorist) ^3%s ^1: %s", sz_name, said)
 		} else {
-			ColorChat(i, GREY, "^1(Spectator) ^3%s ^1: %s", sz_name, said)
+			client_print_color(i, print_team_grey, "^1(Spectator) ^3%s ^1: %s", sz_name, said)
 		}
 	}
 
@@ -3482,7 +3580,7 @@ public ResetSkills(id){
 	for(new x = 1; x <= UPGRADES; x++)
 		PlayerUpgrades[id][x] = 0
 
-	ColorChat(id, GREEN, "^4[SJ]^1 - Your skills have been reset.");
+	client_print_color(id, print_team_default, "^4[SJ]^1 - Your skills have been reset.");
 	BuyUpgrade(id)
 }
 
@@ -3518,7 +3616,8 @@ public CameraChangerAdvancedHandler(id, const cvar[], const value[]){
 		client_cmd(id, "cam_idealyaw 0")
 		client_cmd(id, "cam_snapto 1")
 		client_cmd(id, "thirdperson")
-		client_print(id, print_chat, "[Lagless 3rd] You have to reconnect for the camera to work.")
+		client_print_color(id, print_team_default, "%L", id, "SJ_LAGLES2")
+		//client_print(id, print_chat, "[Lagless 3rd] You have to reconnect for the camera to work.")
 		//client_cmd(id, "reconnect")
 		//client_cmd(id, "wait;wait;wait;wait;wait;^"connect^" %s",ip)
 		//engclient_cmd(id, "wait;wait;wait;wait;wait;^"connect^" %s",ip)
@@ -3578,13 +3677,26 @@ public BuyUpgrade(id){
 	}
 
 	//menu_addblank(menu_upgrade[id], (UPGRADES+1))
-	menu_additem(menu_upgrade[id],"\yTop Stats")
-	menu_additem(menu_upgrade[id],"\yReset")
-	menu_additem(menu_upgrade[id],"\yPlayers Info")
+	formatex(sz_temp, charsmax(sz_temp), "%L", id, "SJ_STATSTITLE")
+	menu_additem(menu_upgrade[id], sz_temp);
+	formatex(sz_temp, charsmax(sz_temp), "%L", id, "SJ_RESET")
+	menu_additem(menu_upgrade[id], sz_temp);
+	formatex(sz_temp, charsmax(sz_temp), "%L", id, "SJ_PLAYERINFO")
+	menu_additem(menu_upgrade[id], sz_temp);
+
+	//menu_additem(menu_upgrade[id],"\yTop Stats")
+	//menu_additem(menu_upgrade[id],"\yReset")
+	//menu_additem(menu_upgrade[id],"\yPlayers Info")
+
 	menu_addblank(menu_upgrade[id], 0)
-	menu_additem(menu_upgrade[id],"\yLagless 3rd Camera \d(requires reconnect)")
+
+	formatex(sz_temp, charsmax(sz_temp), "%L", id, "SJ_LAGLESS")
+	menu_additem(menu_upgrade[id], sz_temp);
+	//menu_additem(menu_upgrade[id],"\yLagless 3rd Camera \d(requires reconnect)")
+
 	menu_setprop(menu_upgrade[id], MPROP_EXIT, MEXIT_NEVER)
 	menu_setprop(menu_upgrade[id],MPROP_PERPAGE,0)
+
 	menu_display(id, menu_upgrade[id], 0)
 
 	return PLUGIN_HANDLED
@@ -3639,7 +3751,7 @@ public Upgrade_Handler(id, menu, item){
 					
 					/*
 					if(PlayerUpgrades[id][STA] == UpgradeMax[STA]){
-						ColorChat(id, GREEN, "^4[SJ]^1 - To prevent stamina upgrade abuse, HP will be added after respawn.")
+						client_print_color(id, print_team_default, "^4[SJ]^1 - To prevent stamina upgrade abuse, HP will be added after respawn.")
 					}
 					*/
 					
@@ -3696,7 +3808,7 @@ public ShowUpgrade(id, player){
 public TNT_ShowUpgrade(id, player){
 	if(g_regtype == 2){
 		if(!equal(g_userClanName[id], g_userClanName[player])){
-			ColorChat(id, RED, "[SJ] ^1- ^3This player is not member of your clan!")
+			client_print_color(id, print_team_red, "[SJ] ^1- ^3This player is not member of your clan!")
 			return PLUGIN_HANDLED
 		}
 	}
@@ -3872,11 +3984,11 @@ public Meter(){
 		set_hudmessage(0, 255, 0, -1.0, 0.85, 0, 0.0, 0.6, 0.0, 0.0, 3)
 
 		//format(szTitle, charsmax(szTitle), "- SPEED: %d -", get_speed(id))
-		format(szTitle, charsmax(szTitle), "- SPEED: %3.1f - ", speedh)
+		format(szTitle, charsmax(szTitle), "- %L: %3.1f - ", id, "SJ_SPEED", speedh)
 
 		if(sec > 30){
 			sec -= get_pcvar_num(cv_turbo)
-			format(sprintText, charsmax(sprintText), "  %s ^n[==============]^n^n- type /help -", szTitle)
+			format(sprintText, charsmax(sprintText), "  %s ^n[==============]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
 			set_speedchange(id)
 			g_sprint[id] = 0
 		} else if(sec >= 0 && sec < 30 && g_sprint[id]) {
@@ -3885,23 +3997,23 @@ public Meter(){
 		}
 
 		switch(sec){
-			case 0:		format(sprintText, charsmax(sprintText), "  %s ^n[||| - SPRINT - |||]^n^n- type /help -", szTitle)
-			case 2:		format(sprintText, charsmax(sprintText), "  %s ^n[|||||||||||||=]^n^n- type /help -", szTitle)
-			case 4:		format(sprintText, charsmax(sprintText), "  %s ^n[||||||||||||==]^n^n- type /help -", szTitle)
-			case 6:		format(sprintText, charsmax(sprintText), "  %s ^n[|||||||||||===]^n^n- type /help -", szTitle)
-			case 8:		format(sprintText, charsmax(sprintText), "  %s ^n[||||||||||====]^n^n- type /help -", szTitle)
-			case 10:	format(sprintText, charsmax(sprintText), "  %s ^n[|||||||||=====]^n^n- type /help -", szTitle)
-			case 12:	format(sprintText, charsmax(sprintText), "  %s ^n[||||||||======]^n^n- type /help -", szTitle)
-			case 14:	format(sprintText, charsmax(sprintText), "  %s ^n[|||||||=======]^n^n- type /help -", szTitle)
-			case 16:	format(sprintText, charsmax(sprintText), "  %s ^n[||||||========]^n^n- type /help -", szTitle)
-			case 18:	format(sprintText, charsmax(sprintText), "  %s ^n[|||||=========]^n^n- type /help -", szTitle)
-			case 20:	format(sprintText, charsmax(sprintText), "  %s ^n[||||==========]^n^n- type /help -", szTitle)
-			case 22:	format(sprintText, charsmax(sprintText), "  %s ^n[|||===========]^n^n- type /help -", szTitle)
-			case 24:	format(sprintText, charsmax(sprintText), "  %s ^n[||============]^n^n- type /help -", szTitle)
-			case 26:	format(sprintText, charsmax(sprintText), "  %s ^n[|=============]^n^n- type /help -", szTitle)
-			case 28:	format(sprintText, charsmax(sprintText), "  %s ^n[==============]^n^n- type /help -", szTitle)
+			case 0:		format(sprintText, charsmax(sprintText), "  %s ^n[||| - TURBO - |||]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 2:		format(sprintText, charsmax(sprintText), "  %s ^n[|||||||||||||=]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 4:		format(sprintText, charsmax(sprintText), "  %s ^n[||||||||||||==]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 6:		format(sprintText, charsmax(sprintText), "  %s ^n[|||||||||||===]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 8:		format(sprintText, charsmax(sprintText), "  %s ^n[||||||||||====]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 10:	format(sprintText, charsmax(sprintText), "  %s ^n[|||||||||=====]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 12:	format(sprintText, charsmax(sprintText), "  %s ^n[||||||||======]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 14:	format(sprintText, charsmax(sprintText), "  %s ^n[|||||||=======]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 16:	format(sprintText, charsmax(sprintText), "  %s ^n[||||||========]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 18:	format(sprintText, charsmax(sprintText), "  %s ^n[|||||=========]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 20:	format(sprintText, charsmax(sprintText), "  %s ^n[||||==========]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 22:	format(sprintText, charsmax(sprintText), "  %s ^n[|||===========]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 24:	format(sprintText, charsmax(sprintText), "  %s ^n[||============]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 26:	format(sprintText, charsmax(sprintText), "  %s ^n[|=============]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
+			case 28:	format(sprintText, charsmax(sprintText), "  %s ^n[==============]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
 			case 30: {
-				format(sprintText, charsmax(sprintText), "  %s ^n[==============]^n^n- type /help -", szTitle)
+				format(sprintText, charsmax(sprintText), "  %s ^n[==============]^n^n- %L -", szTitle, id, "SJ_HELPTYPE") 
 				sec = 92
 			}
 			case 32: sec = 0
@@ -3910,7 +4022,7 @@ public Meter(){
 		seconds[id] = sec
 		show_hudmessage(id, "%s", sprintText)
 		
-		if(!winner){
+		if(GAME_MODE==MODE_GAME && !winner){
 			format(sz_temp, charsmax(sz_temp), " %L ", id,
 			(sz_score%10 == 1 && sz_score%100 != 11)?
 			"SJ_GOALLIM1":"SJ_GOALLIM", sz_score)
@@ -4421,7 +4533,7 @@ public client_putinserver(id){
 		format(g_userCountry_3[id], 3, "")
 		format(g_userCity[id], 45,  "")
 	} else {
-		geoip_country(g_userip[id], g_userCountry[id], 63)
+		geoip_country_ex(g_userip[id], g_userCountry[id], 63, 1)
 		geoip_code2_ex(g_userip[id], g_userCountry_2[id])
 		geoip_code3_ex(g_userip[id], g_userCountry_3[id])
 		geoip_city(g_userip[id], g_userCity[id], 45)
@@ -4454,7 +4566,7 @@ public client_putinserver(id){
 	}
 
 
-	ColorChat(0, GREY, "^4-> ^3%s^1%s%s ^4has joined", sz_temp, sz_name, is_user_admin(id)?" ^3[ADMIN]":"")
+	client_print_color(0, print_team_grey, "^4-> ^3%s^1%s%s ^4se ha unido", sz_temp, sz_name, is_user_admin(id)?" ^3[ADMIN]":"")
 
 	remove_task(id - 8122)
 	
@@ -4547,7 +4659,7 @@ public WhoIs(id){
 
 	show_motd(id, plist, title )
 }
-public client_disconnect(id){
+public client_disconnected(id){
 	{
 		if(rtv[id])
 		{
@@ -4583,7 +4695,7 @@ public client_disconnect(id){
 
 		get_user_name(id, sz_name, 31)
 		format(g_temp, charsmax(g_temp), "|%s| %s^n%L", TeamNames[get_user_team(id)], sz_name,
-		LANG_SERVER, "SJ_DROPBALL")
+		LANG_PLAYER, "SJ_DROPBALL")
 
 		g_ballholder[i] = 0
 
@@ -4598,7 +4710,7 @@ public client_disconnect(id){
 		if(~IsUserConnected(i))
 			continue
 
-		ColorChat(i, RED, "^3<- ^1%s ^3has left", name)
+		client_print_color(i, print_team_red, "^3<- ^1%s ^3se ha ido", name)
 	}
 
 	save_stats(id)
@@ -4675,8 +4787,12 @@ public BeginCountdown(){
 	} else {
 		set_hudmessage(255, 0, 0, -1.0, 0.55, 1, 1.0, 1.0, 1.0, 0.5, 4)
 	}
-	show_hudmessage(0, "GAME BEGINS IN:^n%i", timer)
-	
+	show_hudmessage(0, "EL JUEGO COMIENZA EN: %i SEGUNDOS", timer)
+
+	if(timer == 5 && GAME_TYPE != TYPE_TOURNAMENT){
+		set_task(1.2, "SetupTeams")
+	}
+
 	if(timer == 1){
 		round_restart(1.0)
 		set_task(1.2, "SetupRound")
@@ -4684,11 +4800,25 @@ public BeginCountdown(){
 	timer--
 	set_task(0.9, "BeginCountdown", 9999)
 	
-	
 	if(timer == 0){
 		remove_task(9999)
 		GAME_MODE = MODE_GAME
 	}
+
+}
+
+public SetupTeams(){
+	new EQ = random_num(0, charsmax(TEAM_NAMES));
+	formatex(TeamNames[CT], 31, "%s", TEAM_NAMES[EQ]);
+	new JQ = EQ;
+	while(EQ == JQ)
+	{
+		JQ = random_num(0, charsmax(TEAM_NAMES));
+		formatex(TeamNames[T], 31, "%s", TEAM_NAMES[JQ]);
+	}
+	formatex(EQUIPO_CT_PREFIX, 3, "%s", TEAMS_PREFIX[EQ]);
+	formatex(EQUIPO_T_PREFIX, 3, "%s", TEAMS_PREFIX[JQ]);
+	client_print_color(0, print_team_default, "^4[SJ] ^1 Se han decidido los equipos: ^4%s^1 [CT] VS ^4%s [T]", TeamNames[CT], TeamNames[T])
 }
 
 public CsSetUserScore(id, frags, deaths) {
@@ -4749,7 +4879,7 @@ public AdminMenu_handler(id, menu, item){
 	get_user_name(id, sz_name, 31)
 	if(task_exists(-4211)){
 		remove_task(-4211)
-		ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_RAPIDSET")
+		client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_RAPIDSET")
 		menu_destroy(menu)
 		AdminMenu(id, 0, 0)
 		return PLUGIN_HANDLED
@@ -4764,10 +4894,11 @@ public AdminMenu_handler(id, menu, item){
 		case 1:	{
 			if(get_pcvar_num(cv_chat)){
 				set_pcvar_num(cv_chat, 0)
-				ColorChat(0, RED, "^4[SJ] ^1- ^1Global chat is ^3OFF! ^1(ADMIN: %s)", sz_name)
+				client_print_color(0, print_team_red, "^4[SJ] ^1- ^1Global chat is ^3OFF! ^1(ADMIN: %s)", sz_name)
 			} else {
 				set_pcvar_num(cv_chat, 1)
-				ColorChat(0, GREEN, "^4[SJ] ^1- ^1Global chat is ^4ON! ^1(ADMIN: %s)", sz_name)
+				//client_print_color()
+				client_print_color(0, print_team_default, "^4[SJ] ^1- ^1Global chat is ^4ON! ^1(ADMIN: %s)", sz_name)
 			}
 		}
 		case 2:	{
@@ -4803,13 +4934,13 @@ public SwitchGameSettings(id, sz_set){
 }
 
 public ApplyGameSettings(sz_data[]){
-	new sz_langsets[32], sz_color[2], Color:sz_symb
+	new sz_langsets[32], sz_color[2], sz_symb
 
 	switch (GAME_SETS){
 		case SETS_DEFAULT:{
 			format(sz_langsets, charsmax(sz_langsets), "SJ_DEFSET")
 			format(sz_color, charsmax(sz_color), "^1")
-			sz_symb = GREEN
+			sz_symb = print_team_default
 			set_pcvar_num(cv_turbo, 2)
 			set_pcvar_num(cv_nogoal, 0)
 			set_pcvar_num(cv_lamedist, 90)
@@ -4834,7 +4965,7 @@ public ApplyGameSettings(sz_data[]){
 		case SETS_TRAINING:{
 			format(sz_langsets, charsmax(sz_langsets), "SJ_TRAINING")
 			format(sz_color, charsmax(sz_color), "^3")
-			sz_symb = BLUE
+			sz_symb = print_team_blue
 			set_pcvar_num(cv_turbo, 20)
 			set_pcvar_num(cv_nogoal, 1)
 			set_pcvar_num(cv_lamedist, 0)
@@ -4851,7 +4982,7 @@ public ApplyGameSettings(sz_data[]){
 		case SETS_HEADTOHEAD:{
 			format(sz_langsets, charsmax(sz_langsets), "SJ_HEADTOHEAD")
 			format(sz_color, charsmax(sz_color), "^3")
-			sz_symb = GREY
+			sz_symb = print_team_grey
 			set_pcvar_num(cv_turbo, 20)
 			set_pcvar_num(cv_nogoal, 0)
 			set_pcvar_num(cv_alienzone, 650)
@@ -4863,7 +4994,7 @@ public ApplyGameSettings(sz_data[]){
 		case SETS_ROCKET:{
 			format(sz_langsets, charsmax(sz_langsets), "SJ_ROCKETBALL")
 			format(sz_color, charsmax(sz_color), "^3")
-			sz_symb = RED
+			sz_symb = print_team_red
 			set_pcvar_num(cv_turbo, 20)
 			set_pcvar_num(cv_nogoal, 0)
 			set_pcvar_num(cv_lamedist, 0)
@@ -4880,7 +5011,7 @@ public ApplyGameSettings(sz_data[]){
 	get_user_name(sz_data[0], sz_name, charsmax(sz_name))
 	for(new i = 1; i <= g_maxplayers; i++){
 		if(IsUserConnected(i)){
-			ColorChat(i, sz_symb, "^4[SJ] ^1- %s%L ^1(%L: %s)",
+			client_print_color(i, sz_symb, "^4[SJ] ^1- %s%L ^1(%L: %s)",
 			sz_color, i, sz_langsets, i, "SJ_ADMIN", sz_name)
 			seconds[i] = 0
 		}
@@ -4897,8 +5028,8 @@ public MultiBall(id, level, cid){
 	if(!cmd_access(id, level, cid, 0))
 		return PLUGIN_HANDLED
 	if(g_regtype && GAME_MODE != MODE_PREGAME){
-		//ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_MULTIAV")
-		ColorChat(id, RED, "^4[SJ] ^1- This command is not available now!")
+		//client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_MULTIAV")
+		client_print_color(id, print_team_red, "^4[SJ] ^1- This command is not available now!")
 
 		return PLUGIN_HANDLED
 	}
@@ -4933,7 +5064,7 @@ public MultiBall(id, level, cid){
 	get_user_name(id, sz_name, 31)
 	for(i = 1; i <= g_maxplayers; i++){
 		if(IsUserConnected(i)){
-			ColorChat(i, RED, "^4[SJ] ^1- %L: %s%L! ^1(%L: %s)",
+			client_print_color(i, print_team_red, "^4[SJ] ^1- %L: %s%L! ^1(%L: %s)",
 			i, "SJ_MULTIBALL", g_count_balls?("^4"):("^3"),
 			i, g_count_balls?("SJ_ON"):("SJ_OFF"), i, "SJ_ADMIN", sz_name)
 
@@ -5011,7 +5142,8 @@ public ShowMenuStats(id){
 	}
 	new sz_temp[1024], sz_len, sz_buff[32], sz_name[32]
 	//sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "%L:^n", id, "SJ_STATSTITLE")
-	sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "Top Stats^n")
+	//sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "Top Stats^n")
+	sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "%L:^n", id, "SJ_STATSTITLE")
 	for(new x = 1; x <= RECORDS; x++){
 		if(x == POSSESSION || x == DISTANCE || x == BALLKILL || x == SMACK || x == DEATH || x == HITS || x == BHITS || x == DISHITS || x == DISARMED || x == HUNT)
 			continue
@@ -5022,7 +5154,7 @@ public ShowMenuStats(id){
 		} else {
 			format(sz_buff, 8, "")
 		}
-		sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "^n\w%s \y%s \r%d %s", RecordTitlesLong[x],
+		sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "^n\w%L \y%s \r%d %s",id, RecordTitlesLong[x],
 		TopPlayer[1][x]?sz_name:"", TopPlayer[1][x], sz_buff)
 
 		//menu_additem(menu, x, sz_temp)
@@ -5030,7 +5162,10 @@ public ShowMenuStats(id){
 	//console_print(id, sz_temp)
 	new menu = menu_create(sz_temp, "Done_Handler")
 	menu_setprop(menu, MPROP_EXIT, MEXIT_NEVER)
-	menu_additem(menu, "Close")
+	new szExit[16]
+	formatex(szExit, charsmax(szExit), "%L", id, "EXIT")
+	menu_additem(menu, szExit)
+	//menu_additem(menu, "EXIT")
 
 	menu_display(id, menu, 0)
 	return PLUGIN_HANDLED
@@ -5039,7 +5174,8 @@ public ShowMenuStats(id){
 public ShowMenuStatsSpec(id){
 	new sz_temp[1024], sz_len, sz_buff[32], sz_name[32]
 	//sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "%L:^n", id, "SJ_STATSTITLE")
-	sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "Top Stats^n")
+	//sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "Top Stats^n")
+	sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "%L:^n", id, "SJ_STATSTITLE")
 	for(new x = 1; x <= RECORDS; x++){
 		if(x == POSSESSION || x == DISTANCE || x == BALLKILL || x == SMACK || x == DEATH || x == HITS || x == BHITS || x == DISHITS || x == DISARMED || x == HUNT)
 			continue
@@ -5050,7 +5186,7 @@ public ShowMenuStatsSpec(id){
 		} else {
 			format(sz_buff, 8, "")
 		}
-		sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "^n\w%s \y%s \r%d", RecordTitlesLong[x],
+		sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, "^n\w%L \y%s \r%d", id, RecordTitlesLong[x],
 		TopPlayer[1][x]?sz_name:"", TopPlayer[1][x])
 
 		//menu_additem(menu, x, sz_temp)
@@ -5058,7 +5194,10 @@ public ShowMenuStatsSpec(id){
 	//console_print(id, sz_temp)
 	new menu = menu_create(sz_temp, "Done_Handler")
 	menu_setprop(menu, MPROP_EXIT, MEXIT_NEVER)
-	menu_additem(menu, "Close")
+	new szExit[16]
+	formatex(szExit, charsmax(szExit), "%L", id, "EXIT")
+	menu_additem(menu, szExit)
+	//menu_additem(menu, "EXIT")
 
 	menu_display(id, menu, 0)
 	return PLUGIN_HANDLED
@@ -5104,12 +5243,15 @@ public TNT_ShowMenuPlayerStats(id, player){
 	for(new x = 1; x <= RECORDS; x++){
 		if(x == POSSESSION || x == DEATH || x == HITS || x == BHITS || x == DISHITS || x == DISARMED || x == SMACK || x == DISTANCE || x == BALLKILL)
 			continue
-		sz_len += format(sz_temp[sz_len], 1023 - sz_len,  "\w%s \r%d^n", RecordTitlesLong[x],
+		sz_len += format(sz_temp[sz_len], 1023 - sz_len,  "\w%L \r%d^n", id, RecordTitlesLong[x],
 		MadeRecord[player][x])
 	}
 	new menu = menu_create(sz_temp, "Done_Handler")
 
-	menu_additem(menu, "Close")
+	new szExit[16]
+	formatex(szExit, charsmax(szExit), "%L", id, "EXIT")
+	menu_additem(menu, szExit)
+	//menu_additem(menu, "EXIT")
 	menu_setprop(menu, MPROP_EXIT, MEXIT_NEVER)
 
 	menu_display(id, menu, 0)
@@ -5682,7 +5824,7 @@ public load_stats(id){
 
 public saveDefaultSkills(id){
 	if(contain(g_authid[id], "LAN") != -1 || contain(g_authid[id], "PEND") != -1 || contain(g_authid[id], "STEAM") == -1 || g_authid[id][0] == EOS){
-		ColorChat(id, RED, "^4[SJ] ^1- ^3%L", id, "SJ_STEAMUNA")
+		client_print_color(id, print_team_red, "^4[SJ] ^1- ^3%L", id, "SJ_STEAMUNA")
 		return PLUGIN_HANDLED
 	}
 
@@ -5691,7 +5833,7 @@ public saveDefaultSkills(id){
 		sz_credits += (PlayerUpgrades[id][i]==UpgradeMax[i]?(PlayerUpgrades[id][i] + 1):PlayerUpgrades[id][i])
 	}
 	if(sz_credits > STARTING_CREDITS){
-		ColorChat(id, RED, "^4[SJ] ^1- ^3Currently used amount of credits is more than %d. Default skill can not be saved.", STARTING_CREDITS)
+		client_print_color(id, print_team_red, "^4[SJ] ^1- ^3Currently used amount of credits is more than %d. Default skill can not be saved.", STARTING_CREDITS)
 		return PLUGIN_HANDLED
 	}
 	new sz_len = 0
@@ -5704,7 +5846,7 @@ public saveDefaultSkills(id){
 	}
 	sz_len += format(sz_temp[sz_len], charsmax(sz_temp) - sz_len, " WHERE ID=%d", g_PlayerId[id])
 
-	ColorChat(id, RED, "^4[SJ] ^1- Default skills have been saved.")
+	client_print_color(id, print_team_red, "^4[SJ] ^1- Default skills have been saved.")
 	return PLUGIN_HANDLED
 }
 /*
@@ -5761,7 +5903,7 @@ if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 			}
 		}
 
-		ColorChat(0, GREEN, "^4[SJ] ^1- An admin has started a nextmap vote! Vote starting in %d seconds.",num)
+		client_print_color(0, print_team_default, "^4[SJ] ^1- An admin has started a nextmap vote! Vote starting in %d seconds.",num)
 		if(str_to_num(arg2)) voterocked2=true
 		else voterocked2=false
 		make_menu(str_to_num(arg1))
@@ -5769,7 +5911,7 @@ if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 	}
 	else
 	{
-		ColorChat(id, GREEN, "^4[SJ] ^1- There is already a nextmap vote in progress.")
+		client_print_color(id, print_team_default, "^4[SJ] ^1- There is already a nextmap vote in progress.")
 	}
 	return PLUGIN_CONTINUE
 	}
@@ -5905,8 +6047,8 @@ public Send_Menu()
 public saynextmap(id)
 {
 if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
-	if(strlen(cur_nextmap)) ColorChat(0, GREEN, "^4[SJ] ^1- Nextmap: %s",cur_nextmap) //client_print(0,print_chat,"[SJ] - Nextmap: %s",cur_nextmap)
-	else ColorChat(0, GREEN, "^4[SJ] ^1- Nextmap hasn't been chosen yet.") //client_print(0,print_chat,"[SJ] - Nextmap not chosen yet.")
+	if(strlen(cur_nextmap)) client_print_color(0, print_team_default, "^4[SJ] ^1- Nextmap: %s",cur_nextmap) //client_print(0,print_chat,"[SJ] - Nextmap: %s",cur_nextmap)
+	else client_print_color(0, print_team_default, "^4[SJ] ^1- Nextmap hasn't been chosen yet.") //client_print(0,print_chat,"[SJ] - Nextmap not chosen yet.")
 	}
 }
 
@@ -5946,7 +6088,7 @@ public sayrockthevote(id)
 if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 	if(voterocked==-1.0)
 	{
-		ColorChat(id, GREEN, "^4[SJ] ^1- Voting Currently in Process.")
+		client_print_color(id, print_team_default, "^4[SJ] ^1- Voting Currently in Process.")
 	}
 	else if((!voterocked && get_gametime()>get_pcvar_num(rtv_wait_pcvar)) || (get_gametime() - voterocked) > get_pcvar_num(rtv_wait_pcvar))
 	{
@@ -5954,7 +6096,7 @@ if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 		{
 			if(rtv[id])
 			{
-				ColorChat(id, GREEN, "^4[SJ] ^1- You have already voted to Rock the Vote.")
+				client_print_color(id, print_team_default, "^4[SJ] ^1- You have already voted to Rock the Vote.")
 			}
 			else
 			{
@@ -5971,8 +6113,8 @@ if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 
 				if(num3<=0)
 				{
-					ColorChat(0, GREEN, "^4[SJ] ^1- %s has voted to Rock the Vote.",name)
-					ColorChat(0, GREEN, "^4[SJ] ^1- The Vote has been Rocked!")
+					client_print_color(0, print_team_default, "^4[SJ] ^1- %s has voted to Rock the Vote.",name)
+					client_print_color(0, print_team_default, "^4[SJ] ^1- The Vote has been Rocked!")
 					log_amx("[SJ] - Vote has been rocked. The map will be changed.")
 					make_menu(1)
 
@@ -5980,28 +6122,28 @@ if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 				}
 				else
 				{
-					if(num3!=1) ColorChat(0, GREEN, "^4[SJ] ^1- %s has voted to Rock the Vote. Need %d more players.",name,num3)
-					else ColorChat(0, GREEN, "^4[SJ] ^1-  %s has voted to Rock the Vote. Need 1 more player.",name)
+					if(num3!=1) client_print_color(0, print_team_default, "^4[SJ] ^1- %s has voted to Rock the Vote. Need %d more players.",name,num3)
+					else client_print_color(0, print_team_default, "^4[SJ] ^1-  %s has voted to Rock the Vote. Need 1 more player.",name)
 				}
 			}
 		}
 		else
 		{
-			ColorChat(id, GREEN, "^4[SJ] ^1- Rock the Vote is disabled.")
+			client_print_color(id, print_team_default, "^4[SJ] ^1- Rock the Vote is disabled.")
 		}
 	}
 	else if(voterocked>0.0)
 	{
-		ColorChat(id, GREEN, "^4[SJ] ^1- Cannot Rock the Vote again for another %d seconds.",get_pcvar_num(rtv_wait_pcvar) - (floatround(get_gametime()) - floatround(voterocked)))
+		client_print_color(id, print_team_default, "^4[SJ] ^1- Cannot Rock the Vote again for another %d seconds.",get_pcvar_num(rtv_wait_pcvar) - (floatround(get_gametime()) - floatround(voterocked)))
 	}
 	else
 	{
-		ColorChat(id, GREEN, "^4[SJ] ^1- Cannot Rock the Vote till %d seconds after map start. (%d more seconds)",get_pcvar_num(rtv_wait_pcvar),get_pcvar_num(rtv_wait_pcvar) - floatround(get_gametime()))
+		client_print_color(id, print_team_default, "^4[SJ] ^1- Cannot Rock the Vote till %d seconds after map start. (%d more seconds)",get_pcvar_num(rtv_wait_pcvar),get_pcvar_num(rtv_wait_pcvar) - floatround(get_gametime()))
 	}
 
 	return PLUGIN_CONTINUE
 	}
-return PLUGIN_HANDLED
+return PLUGIN_HANDLED_MAIN
 }
 
 /*
@@ -6010,23 +6152,23 @@ public saynominate(id,nom_map[64])
 	if(file_exists(configfile) && get_cvar_num("sj_mapchooser")){
 		if(has_nominated[id])
 		{
-			ColorChat(id, GREEN, "^4[SJ] ^1- You have already nominated a map.")
+			client_print_color(id, print_team_default, "^4[SJ] ^1- You have already nominated a map.")
 		}
 		else if(is_map_valid2(nom_map))
 		{
 			if(equali(nom_map,currentmap))
 			{
-				ColorChat(0, GREEN,"^4[SJ] ^1- Cannot nominate the current map.")
+				client_print_color(0, print_team_default,"^4[SJ] ^1- Cannot nominate the current map.")
 				return PLUGIN_CONTINUE
 			}
 			else if(!get_pcvar_num(lastmap_pcvar) && equali(nom_map,lastmap))
 			{
-				ColorChat(0, GREEN, "^4[SJ] ^1- Cannot nominate the previous map.")
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Cannot nominate the previous map.")
 				return PLUGIN_CONTINUE
 			}
 			else if(!get_pcvar_num(lastlastmap_pcvar) && equali(nom_map,lastlastmap))
 			{
-				ColorChat(0, GREEN, "^4[SJ] ^1- Cannot nominate the previous to previous map.")
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Cannot nominate the previous to previous map.")
 				return PLUGIN_CONTINUE
 			}
 
@@ -6034,7 +6176,7 @@ public saynominate(id,nom_map[64])
 			{
 				if(equali(nominated[i],nom_map))
 				{
-					ColorChat(0, GREEN, "^4[SJ] ^1- That map has already been nominated.")
+					client_print_color(0, print_team_default, "^4[SJ] ^1- That map has already been nominated.")
 					return PLUGIN_CONTINUE
 				}
 			}
@@ -6044,12 +6186,12 @@ public saynominate(id,nom_map[64])
 
 			new name[32]
 			get_user_name(id,name,31)
-			ColorChat(0, GREEN, "^4[SJ] ^1- %s nominated %s.",name,nom_map)
+			client_print_color(0, print_team_default, "^4[SJ] ^1- %s nominated %s.",name,nom_map)
 			has_nominated[id] = true
 		}
 		else
 		{
-			ColorChat(0, GREEN, "^4[SJ] ^1- This map isn't on the server.")
+			client_print_color(0, print_team_default, "^4[SJ] ^1- This map isn't on the server.")
 		}
 
 		return PLUGIN_CONTINUE
@@ -6132,16 +6274,16 @@ public VoteCount(id,key)
 			get_user_name(id,name,31)
 			if(key==8)
 			{
-				if(get_pcvar_num(showvotes_pcvar)) ColorChat(0, GREEN, "^4[SJ] ^1- %s voted for map extension.",name)
+				if(get_pcvar_num(showvotes_pcvar)) client_print_color(0, print_team_default, "^4[SJ] ^1- %s voted for map extension.",name)
 				votes[9]++
 			}
 			else if(key==9)
 			{
-				if(get_pcvar_num(showvotes_pcvar)) ColorChat(0, GREEN, "^4[SJ] ^1- %s didn't vote.",name)
+				if(get_pcvar_num(showvotes_pcvar)) client_print_color(0, print_team_default, "^4[SJ] ^1- %s didn't vote.",name)
 			}
 			else if(strlen(maps[key+1]))
 			{
-				if(get_pcvar_num(showvotes_pcvar)) ColorChat(0, GREEN, "^4[SJ] ^1- %s voted for %s.",name,maps[key+1])
+				if(get_pcvar_num(showvotes_pcvar)) client_print_color(0, print_team_default, "^4[SJ] ^1- %s voted for %s.",name,maps[key+1])
 				votes[key+1]++
 			}
 			else
@@ -6179,14 +6321,14 @@ public VoteTally(num)
 				//set_cvar_string("qq_lastmap",mapname)
 				get_mapname(currentmap,31)
 				set_cvar_string("currentmap",mapname)
-				ColorChat(0, GREEN, "^4[SJ] ^1- Nobody voted.")
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Nobody voted.")
 				set_task(15.0,"Check_Endround",1337,"",0,"b")
 				set_cvar_string("amx_nextmap",mapname)
 				extended++
 			}
 			else
 			{
-				ColorChat(0, GREEN, "^4[SJ] ^1- Nobody voted.")
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Nobody voted.")
 				voterocked=get_gametime()
 				set_task(15.0,"Check_Endround",1337,"",0,"b")
 				extended++
@@ -6196,13 +6338,13 @@ public VoteTally(num)
 		{
 			if(!voterocked2)
 			{
-				ColorChat(0, GREEN, "^4[SJ] ^1- Map extending won. Restarting map.")
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Map extending won. Restarting map.")
 				set_task(15.0,"Check_Endround",1337,"",0,"b")
 				extended++
 			}
 			else
 			{
-				ColorChat(0, GREEN, "^4[SJ] ^1- Map extending won. No new map.")
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Map extending won. No new map.")
 			}
 			voterocked=get_gametime()
 		}
@@ -6218,7 +6360,7 @@ public VoteTally(num)
 			/*
 			if(voterocked2){
 				if(equali(winner[0],currentmap)){
-				ColorChat(0, GREEN,"^4[SJ] ^1- Chosen map is the same as the current one.")
+				client_print_color(0, print_team_default,"^4[SJ] ^1- Chosen map is the same as the current one.")
 				voterocked=get_gametime()
 				//return PLUGIN_CONTINUE
 				}
@@ -6227,7 +6369,7 @@ public VoteTally(num)
 			
 			if(!voterocked2)
 			{
-				ColorChat(0, GREEN, "^4[SJ] ^1- Voting Over. Nextmap will be %s.",maps[winner[0]])
+				client_print_color(0, print_team_default, "^4[SJ] ^1- Voting Over. Nextmap will be %s.",maps[winner[0]])
 				set_cvar_string("amx_nextmap",maps[winner[0]])
 				set_task(1.0,"change_level",winner[0],"",0,"d")
 			}
@@ -6235,12 +6377,12 @@ public VoteTally(num)
 			{
 				//set_task(5.0,"change_level",winner[0])
 				if(equali(maps[winner[0]],currentmap)){
-					ColorChat(0, GREEN,"^4[SJ] ^1- Chosen map is the same as the current one.")
+					client_print_color(0, print_team_default,"^4[SJ] ^1- Chosen map is the same as the current one.")
 					voterocked=get_gametime()
 				}
 				else
 				{
-					ColorChat(0, GREEN, "^4[SJ] ^1- Voting Over. Nextmap will be %s.",maps[winner[0]])
+					client_print_color(0, print_team_default, "^4[SJ] ^1- Voting Over. Nextmap will be %s.",maps[winner[0]])
 					set_task(5.0,"change_level",winner[0])
 				}
 			}
@@ -6512,7 +6654,7 @@ public func_afk_check(taskid){
 
 public func_transfer_player(id){
 	if (g_iWarn[id] < MAX_WARN){
-		ColorChat(id, GREEN, "^4[SJ]^1 - %L", LANG_SERVER, "AFK_TRANSFER_WARN", floatround(FREQ_AFK_CHECK) * (MAX_WARN - g_iWarn[id]))
+		client_print_color(id, print_team_default, "^4[SJ]^1 - %L", LANG_PLAYER, "AFK_TRANSFER_WARN", floatround(FREQ_AFK_CHECK) * (MAX_WARN - g_iWarn[id]))
 		g_iWarn[id]++
 		return
 	}
@@ -6521,9 +6663,9 @@ public func_transfer_player(id){
 	get_user_name(id, sz_name, 31)
 	new sz_team = get_user_team(id)
 	if(sz_team == T){
-		ColorChat(0, RED, "^4[SJ] ^1- ^3%s ^1was transfered to spectators for being AFK.", sz_name)
+		client_print_color(0, print_team_red, "^4[SJ] ^1- ^3%s ^1was transfered to spectators for being AFK.", sz_name)
 	} else {
-		ColorChat(0, BLUE, "^4[SJ] ^1- ^3%s ^1was transfered to spectators for being AFK.", sz_name)
+		client_print_color(0, print_team_blue, "^4[SJ] ^1- ^3%s ^1was transfered to spectators for being AFK.", sz_name)
 	}
 
 	log_amx("Player ^"%s^" was transfered to the spectators for being AFK.", sz_name)
@@ -6545,7 +6687,7 @@ public func_kick_player(id){
 	if (iCurrentPlayers < g_iMinPlayers || !g_iMinPlayers) return
 
 	if (g_iWarn[id] < MAX_WARN){
-		ColorChat(id, GREEN, "^4[SJ]^1 - %L", LANG_PLAYER, "AFK_KICK_WARN", floatround(FREQ_AFK_CHECK) * (MAX_WARN - g_iWarn[id]))
+		client_print_color(id, print_team_default, "^4[SJ]^1 - %L", LANG_PLAYER, "AFK_KICK_WARN", floatround(FREQ_AFK_CHECK) * (MAX_WARN - g_iWarn[id]))
 		g_iWarn[id]++
 		return
 	}
@@ -6558,11 +6700,11 @@ public func_kick_player(id){
 	get_user_name(id, sz_name, 31)
 	new sz_team = get_user_team(id)
 	if(sz_team == T){
-		ColorChat(0, RED, "^4[SJ] ^1- ^3%s ^1was kicked for being AFK.", sz_name) 
+		client_print_color(0, print_team_red, "^4[SJ] ^1- ^3%s ^1was kicked for being AFK.", sz_name) 
 	} else if(sz_team == CT){
-		ColorChat(0, BLUE, "^4[SJ] ^1- ^3%s ^1was kicked for being AFK.", sz_name)
+		client_print_color(0, print_team_blue, "^4[SJ] ^1- ^3%s ^1was kicked for being AFK.", sz_name)
 	} else {
-		ColorChat(0, BLUE, "^4[SJ] ^1- %s was kicked for being AFK.", sz_name)
+		client_print_color(0, print_team_blue, "^4[SJ] ^1- %s was kicked for being AFK.", sz_name)
 	}
 	log_amx("Player ^"%s^" was kicked for being AFK.", sz_name)
 }
@@ -6593,7 +6735,7 @@ public cvar_result(id, const cvar[], const value[])
     if(!fValue) 
         return
     client_cmd(id, "developer 0")
-    ColorChat(id, RED, "^4[SJ] ^1- ^3developer ^1is forbidden.") 
+    client_print_color(id, print_team_red, "^4[SJ] ^1- ^3developer ^1is forbidden.") 
      
     if(++g_iCount[id] >= get_pcvar_num(g_pcvarMaxCount)){ 
 		server_cmd("kick #%d Developer isn't allowed on this server", get_user_userid(id)) 
@@ -6603,9 +6745,9 @@ public cvar_result(id, const cvar[], const value[])
 		get_user_name(id, sz_name, 31)
 	
 		if(sz_team == T){
-			ColorChat(0, RED, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
+			client_print_color(0, print_team_red, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
 		} else {
-			ColorChat(0, BLUE, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
+			client_print_color(0, print_team_blue, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
 		}
     }
 }
@@ -6617,7 +6759,7 @@ public cvar_result2(id, const cvar[], const value[])
     if(!fValue) 
         return
     client_cmd(id, "fps_override 0") 
-    ColorChat(id, RED, "^4[SJ] ^1- ^3fps_override ^1is forbidden.") 
+    client_print_color(id, print_team_red, "^4[SJ] ^1- ^3fps_override ^1is forbidden.") 
      
     if(++g_iCount[id] >= get_pcvar_num(g_pcvarMaxCount)){ 
 		server_cmd("kick #%d fps_override isn't allowed on this server", get_user_userid(id)) 
@@ -6627,9 +6769,9 @@ public cvar_result2(id, const cvar[], const value[])
 		get_user_name(id, sz_name, 31)
 	
 		if(sz_team == T){
-			ColorChat(0, RED, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
+			client_print_color(0, print_team_red, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
 		} else {
-			ColorChat(0, BLUE, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
+			client_print_color(0, print_team_blue, "^4[SJ] ^1- ^3%s ^1was kicked for abusing fps.", sz_name)
 		}
     }
 }
@@ -6641,7 +6783,7 @@ public cvar_result3(id, const cvar[], const value[])
     if(!fValue) 
         return 
     client_cmd(id, "fakeloss 0") 
-    ColorChat(id, RED, "^4[SJ] ^1- ^3fakeloss ^1is forbidden.") 
+    client_print_color(id, print_team_red, "^4[SJ] ^1- ^3fakeloss ^1is forbidden.") 
     if(++g_iCount[id] >= get_pcvar_num(g_pcvarMaxCount)){ 
 		server_cmd("kick #%d fakeloss isn't allowed on this server", get_user_userid(id)) 
 		
@@ -6650,9 +6792,9 @@ public cvar_result3(id, const cvar[], const value[])
 		get_user_name(id, sz_name, 31)
 		
 		if(sz_team == T){
-			ColorChat(0, RED, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
+			client_print_color(0, print_team_red, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
 		} else {
-			ColorChat(0, BLUE, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
+			client_print_color(0, print_team_blue, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
 		}
     }
 }
@@ -6664,7 +6806,7 @@ public cvar_result4(id, const cvar[], const value[])
     if(!fValue) 
         return 
     client_cmd(id, "fakelag 0") 
-    ColorChat(id, RED, "^4[SJ] ^1- ^3fakelag ^1is forbidden.") 
+    client_print_color(id, print_team_red, "^4[SJ] ^1- ^3fakelag ^1is forbidden.") 
     if(++g_iCount[id] >= get_pcvar_num(g_pcvarMaxCount)){ 
 		server_cmd("kick #%d fakelag isn't allowed on this server", get_user_userid(id)) 
 		
@@ -6673,9 +6815,9 @@ public cvar_result4(id, const cvar[], const value[])
 		get_user_name(id, sz_name, 31)
 		
 		if(sz_team == T){
-			ColorChat(0, RED, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
+			client_print_color(0, print_team_red, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
 		} else {
-			ColorChat(0, BLUE, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
+			client_print_color(0, print_team_blue, "^4[SJ] ^1- ^3%s ^1was kicked.", sz_name)
 		}
     }
 }
